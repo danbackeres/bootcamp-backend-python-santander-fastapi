@@ -25,3 +25,25 @@ Abra o terminal e digite:
 ```
 workoutapi\Scripts\activate
 ```
+
+## Rodar as Migrations
+
+O comando deve estar configurado no `Makefile`
+
+Antes suba o servidor PostgreSQL:
+
+```
+docker compose up -d
+```
+
+Depois crie as migrations:
+
+```
+make create-migrations d="init_db"
+```
+
+E por fim rode:
+
+```
+make run-migrations
+```
