@@ -1,15 +1,17 @@
 from datetime import datetime
-from http.client import HTTPException
+from typing import Optional
 from uuid import uuid4
-from fastapi import APIRouter, status, Body
+from fastapi import APIRouter, status, Body, Query, HTTPException
+from fastapi_pagination import Page, paginate, add_pagination
 
 from workout_api.categorias.models import CategoriaModel
 from workout_api.centro_treinamento.models import CentroTreinamentoModel
 from workout_api.contrib.dependencies import DatabaseDependency
-from workout_api.atleta.schemas import AtletaIn, AtletaOut, AtletaUpdate
+from workout_api.atleta.schemas import AtletaIn, AtletaListOut, AtletaOut, AtletaUpdate
 from workout_api.atleta.models import AtletaModel
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 
 api_router = APIRouter()
 
@@ -31,20 +33,51 @@ async def post(db_session: DatabaseDependency, atleta_in: AtletaIn = Body(...)):
         atleta_model = AtletaModel(**atleta_in.model_dump(exclude={'categoria', 'centro_treinamento'}))
         atleta_model.categoria_id = categoria.pk_id
         atleta_model.centro_treinamento_id = centro_treinamento.pk_id
-        
-        
         db_session.add(atleta_model)
         await db_session.commit()
+    except IntegrityError as e:
+        await db_session.rollback()
+        if "cpf" in str(e.orig).lower():
+            raise HTTPException(
+                status_code=303,
+                detail=f"Já existe um atleta cadastrado com o cpf: {atleta_in.cpf}"
+            )
+        raise HTTPException(status_code=500, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
     
     return atleta_out
 
-@api_router.get('/', summary="Consultar todos os atletas", status_code=status.HTTP_200_OK, response_model=list[AtletaOut])
-async def query(db_session: DatabaseDependency) -> list[AtletaOut]: # type: ignore
-    atletas: list[AtletaOut] = (await db_session.execute(select(AtletaModel))).scalars().all()
+@api_router.get(
+    '/',
+    summary="Consultar todos os atletas",
+    status_code=status.HTTP_200_OK,
+    response_model=list[AtletaListOut]
+)
+async def query(
+    db_session: DatabaseDependency,
+    nome: Optional[str] = Query(None, description="Filtrar por nome"),
+    cpf: Optional[str] = Query(None, description="Filtrar por CPF")
+) -> list[AtletaListOut]: # type: ignore
     
-    return [AtletaOut.model_validate(atleta) for atleta in atletas]
+    query = select(AtletaModel)
+    if nome:
+        query = query.where(AtletaModel.nome.ilike(f"%{nome}%"))
+    if cpf:
+        query = query.where(AtletaModel.cpf == cpf)
+    result = await db_session.execute(query)
+    atletas = result.scalars().all()
+
+    lista_saida = [
+        AtletaListOut(
+            nome=a.nome,
+            centro_treinamento=a.centro_treinamento.nome if a.centro_treinamento else "",
+            categoria=a.categoria.nome if a.categoria else ""
+        )
+        for a in atletas
+    ]
+    return paginate(lista_saida)
+
 
 @api_router.get('/{id}', summary="Consultar atleta pelo id", status_code=status.HTTP_200_OK, response_model=AtletaOut)
 async def query(id: UUID4, db_session: DatabaseDependency) -> AtletaOut: # type: ignore

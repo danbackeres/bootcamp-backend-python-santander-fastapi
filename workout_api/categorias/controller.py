@@ -1,14 +1,14 @@
-from http.client import HTTPException
 from uuid import uuid4
 
 from pydantic import UUID4
-from fastapi import APIRouter, status, Body
+from fastapi import APIRouter, status, Body, HTTPException
 
 from workout_api.contrib.dependencies import DatabaseDependency
 from workout_api.categorias.schemas import CategoriaIn, CategoriaOut
 from workout_api.categorias.models import CategoriaModel
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 
 api_router = APIRouter()
 
@@ -18,8 +18,17 @@ async def post(db_session: DatabaseDependency, categoria_in: CategoriaIn = Body(
     categoria_out = CategoriaOut(id=uuid4(), **categoria_in.model_dump())
     categoria_model = CategoriaModel(**categoria_in.model_dump())
     db_session.add(categoria_model)
-    await db_session.commit()
-    
+    try:
+        await db_session.commit()
+    except IntegrityError as e:
+        await db_session.rollback()
+        if "nome" in str(e.orig).lower():
+            raise HTTPException(
+                status_code=303,
+                detail=f"Já existe uma categoria cadastrada com o nome: {categoria_in.nome}"
+            )
+        raise HTTPException(status_code=500, detail=str(e))
+    categoria_out = CategoriaOut(id=uuid4(), **categoria_in.model_dump())
     return categoria_out
 
 @api_router.get('/', summary="Consultar todas as Categorias", status_code=status.HTTP_200_OK, response_model=list[CategoriaOut])

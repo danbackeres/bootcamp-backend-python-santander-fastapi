@@ -25,3 +25,8 @@ class AtletaOut(AtletaIn, OutMixin):
 class AtletaUpdate(BaseSchema):
     nome: Annotated[Optional[str], Field(None, title="Nome do atleta", example="João", max_length=50)]
     idade: Annotated[Optional[int], Field(None, title="Idade do atleta", example="20", ge=0, le=120)]
+
+class AtletaListOut(BaseModel):
+    nome: str
+    centro_treinamento: str
+    categoria: str
